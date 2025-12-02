@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Wand2, Play, RefreshCw } from 'lucide-react';
+import { Wand2, Play, RefreshCw, RotateCcw } from 'lucide-react';
 import { FileUploader } from './components/FileUploader';
 import { FilterBar } from './components/FilterBar';
 import { ScheduleGrid } from './components/ScheduleGrid';
 import { ConflictPanel } from './components/ConflictPanel';
 import { ExportButton } from './components/ExportButton';
 import { CourseDetailModal } from './components/CourseDetailModal';
+import { AiAssistant } from './components/AiAssistant';
 import { Button } from './components/ui/button';
 import { Badge } from './components/ui/badge';
 import { useScheduleStore } from './stores/scheduleStore';
@@ -13,7 +14,7 @@ import { useScheduler } from './hooks/useScheduler';
 import type { ScheduledSection } from './types';
 
 function App() {
-  const { courses, rooms, sections, warnings, conflicts, loadSample } = useScheduleStore();
+  const { courses, rooms, sections, warnings, conflicts, loadSample, refresh } = useScheduleStore();
   const { runScheduler, isRunning } = useScheduler();
   const [selected, setSelected] = useState<ScheduledSection | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -47,8 +48,12 @@ function App() {
             </div>
             <div className="flex gap-2">
               <ExportButton />
-              <Button variant="outline" onClick={() => loadSample()}>
+              <Button variant="outline" onClick={() => refresh()} title="Force refresh view">
                 <RefreshCw className="mr-2 h-4 w-4" />
+                Refresh
+              </Button>
+              <Button variant="outline" onClick={() => loadSample()}>
+                <RotateCcw className="mr-2 h-4 w-4" />
                 Reset to sample
               </Button>
               <Button onClick={() => runScheduler()} disabled={isRunning}>
@@ -104,6 +109,7 @@ function App() {
       </div>
 
       <CourseDetailModal open={modalOpen} onOpenChange={setModalOpen} section={selected} />
+      <AiAssistant />
     </div>
   );
 }

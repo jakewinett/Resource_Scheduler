@@ -16,13 +16,12 @@ import {
 import {
   dayPatternMap,
   formatMeetingLabel,
-  getTimeBlock,
   hasBufferConflict,
-  isDayAfterLecture,
   minutesToTime,
   timeToMinutes,
   toDurationMinutes,
 } from './timeUtils';
+import { getBufferMinutes, labPatternAllowed, meetsTimePreference } from './rules';
 
 type Booking = { start: number; end: number };
 type ScheduleState = {
@@ -43,19 +42,6 @@ const baseState = (): ScheduleState => ({
   roomBookings: new Map(),
   teacherBookings: new Map(),
 });
-
-const getBufferForCourse = (course: CourseDefinition) => (course.isLab ? 60 : 15);
-
-const meetsTimePreference = (course: CourseDefinition, startMinutes: number) => {
-  const block = getTimeBlock(startMinutes);
-  if (course.subject === 'Chemistry' && course.courseNumber >= 301) {
-    return block === 'morning';
-  }
-  if (course.courseNumber >= 301) {
-    return course.isLab ? block === 'evening' : block === 'afternoon';
-  }
-  return true;
-};
 
 const orderCourses = (courses: CourseDefinition[], rooms: Room[]) => {
   const compatibilitySize = (course: CourseDefinition) => getCompatibleRooms(course, rooms).length || 99;
@@ -113,12 +99,6 @@ const isDaySetAvailable = (room: Room, pattern: DayPattern) => {
   return needed.every((day) => room.availableDays.includes(day));
 };
 
-const matchesLabSequence = (course: CourseDefinition, pattern: DayPattern) => {
-  if (!course.isLab || course.courseNumber < 301) return true;
-  const candidateDays = dayPatternMap[pattern];
-  return candidateDays.some((day) => isDayAfterLecture(day, course.lectureDayPattern));
-};
-
 const attemptPlaceSection = (
   course: CourseDefinition,
   sectionNumber: number,
@@ -132,11 +112,11 @@ const attemptPlaceSection = (
     return diffA - diffB;
   });
   const patterns = allowedPatterns(course.daysPerWeek);
-  const buffer = getBufferForCourse(course);
+  const buffer = getBufferMinutes(course);
 
   for (const pattern of patterns) {
     for (const room of compatibleRooms) {
-      if (!isDaySetAvailable(room, pattern) || !matchesLabSequence(course, pattern)) continue;
+      if (!isDaySetAvailable(room, pattern) || !labPatternAllowed(course, pattern)) continue;
       const candidates = generateCandidates(course, room);
       for (const candidate of candidates) {
         const slot: Booking = {
@@ -164,6 +144,9 @@ const attemptPlaceSection = (
           isLab: course.isLab,
           subject: course.subject,
           courseNumber: course.courseNumber,
+          durationHours: course.durationHours,
+          daysPerWeek: course.daysPerWeek,
+          lectureDayPattern: course.lectureDayPattern,
         };
 
         state.sections.push(section);

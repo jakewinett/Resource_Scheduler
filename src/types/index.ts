@@ -65,6 +65,9 @@ export interface ScheduledSection {
   isLab?: boolean;
   subject?: Subject;
   courseNumber?: number;
+  durationHours?: number;
+  daysPerWeek?: number;
+  lectureDayPattern?: DayPattern;
 }
 
 export interface ScheduleResult {

@@ -1,3 +1,4 @@
+import type { HTMLAttributes } from 'react';
 import type { ScheduledSection } from '../types';
 import { cn } from '../lib/utils';
 
@@ -13,30 +14,23 @@ export interface PositionedSection extends ScheduledSection {
   _width?: string;
 }
 
-interface Props {
+interface Props extends HTMLAttributes<HTMLDivElement> {
   section: PositionedSection;
-  onSelect?: (section: PositionedSection) => void;
 }
 
-export const ScheduleBlock = ({ section, onSelect }: Props) => (
+export const ScheduleBlock = ({ section, className, style, ...props }: Props) => (
   <div
     className={cn(
       'absolute inset-y-1 rounded-lg border px-2 py-1 text-xs shadow-sm ring-2',
       subjectPalette[section.subject || ''] || 'bg-slate-100 text-slate-900 ring-slate-200',
+      className,
     )}
-    onClick={() => onSelect?.(section)}
-    onKeyDown={(e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        onSelect?.(section);
-      }
-    }}
-    role="button"
-    tabIndex={0}
     style={{
       left: section._offset,
       width: section._width,
+      ...style,
     }}
+    {...props}
   >
     <div className="font-semibold leading-tight">{section.courseId}</div>
     <div className="text-[11px]">{section.dayPattern} · {section.startTime}-{section.endTime}</div>

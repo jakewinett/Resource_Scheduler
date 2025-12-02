@@ -12,6 +12,8 @@ import type {
 } from '../types';
 import { sampleCalendar, sampleCourses, sampleRooms } from '../data/sampleData';
 import { generateSchedule } from '../utils/scheduler/solver';
+import { collectTimePreferenceWarnings, validateManualPlacement } from '../utils/scheduler/manualValidator';
+import { minutesToTime, timeToMinutes } from '../utils/scheduler/timeUtils';
 
 export type ViewMode = 'room' | 'teacher' | 'day';
 
@@ -38,6 +40,11 @@ type ScheduleState = {
   setFromWorkbook: (data: ParsedWorkbook) => void;
   generate: () => ScheduleResult;
   setScheduleResult: (result: ScheduleResult) => void;
+  refresh: () => void;
+  moveSection: (
+    sectionId: string,
+    updates: Partial<Pick<ScheduledSection, 'startTime' | 'endTime' | 'dayPattern' | 'roomId'>>,
+  ) => { success: boolean; warnings: string[]; conflicts: string[] };
 };
 
 export const useScheduleStore = create<ScheduleState>()(
@@ -91,6 +98,28 @@ export const useScheduleStore = create<ScheduleState>()(
           warnings: result.warnings,
           unscheduled: result.unscheduled,
         })),
+      refresh: () => set((state) => ({ sections: [...state.sections] })),
+      moveSection: (sectionId, updates) => {
+        const state = get();
+        const index = state.sections.findIndex((section) => section.id === sectionId);
+        if (index === -1) return { success: false, conflicts: ['Section not found'], warnings: [] };
+        const current = state.sections[index];
+        const nextSection = { ...current, ...updates };
+        if (updates.startTime && !updates.endTime) {
+          const startMinutes = timeToMinutes(updates.startTime);
+          const duration = timeToMinutes(current.endTime) - timeToMinutes(current.startTime);
+          nextSection.endTime = minutesToTime(startMinutes + duration);
+        }
+        const validation = validateManualPlacement(nextSection, state.sections, state.rooms);
+        if (!validation.valid) {
+          return { success: false, conflicts: validation.conflicts, warnings: [] };
+        }
+        const nextSections = [...state.sections];
+        nextSections[index] = nextSection;
+        const warnings = collectTimePreferenceWarnings(nextSections);
+        set(() => ({ sections: nextSections, warnings }));
+        return { success: true, warnings: validation.warnings, conflicts: [] };
+      },
     }),
     {
       name: 'schedule-store',

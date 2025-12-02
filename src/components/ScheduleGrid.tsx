@@ -1,12 +1,16 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { useScheduleStore } from '../stores/scheduleStore';
 import { ScheduleBlock, type PositionedSection } from './ScheduleBlock';
 import type { ScheduledSection } from '../types';
+import { minutesToTime, timeToMinutes, formatMeetingLabel } from '../utils/scheduler/timeUtils';
+import { cn } from '../lib/utils';
 
 const START_MIN = 7 * 60;
 const END_MIN = 22 * 60;
 const TOTAL = END_MIN - START_MIN;
+const STEP = 15;
 
 const mapSectionsToRows = (sections: ScheduledSection[], view: 'room' | 'teacher' | 'day') => {
   if (view === 'room') {
@@ -34,20 +38,45 @@ const mapSectionsToRows = (sections: ScheduledSection[], view: 'room' | 'teacher
   return grouped;
 };
 
-const positionSection = (section: ScheduledSection): PositionedSection => {
-  const startMin = parseInt(section.startTime.split(':')[0], 10) * 60 + parseInt(section.startTime.split(':')[1], 10);
-  const endMin = parseInt(section.endTime.split(':')[0], 10) * 60 + parseInt(section.endTime.split(':')[1], 10);
+const positionSection = (section: ScheduledSection, overrideStart?: number): PositionedSection => {
+  const startMin = overrideStart ?? timeToMinutes(section.startTime);
+  const duration = timeToMinutes(section.endTime) - timeToMinutes(section.startTime);
+  const endMin = overrideStart ? startMin + duration : timeToMinutes(section.endTime);
   const offset = ((startMin - START_MIN) / TOTAL) * 100;
   const width = ((endMin - startMin) / TOTAL) * 100;
-  return { ...section, _offset: `${offset}%`, _width: `${width}%` };
+  return {
+    ...section,
+    startTime: overrideStart ? minutesToTime(startMin) : section.startTime,
+    endTime: overrideStart ? minutesToTime(endMin) : section.endTime,
+    _offset: `${offset}%`,
+    _width: `${width}%`,
+  };
 };
 
 interface Props {
   onSelect?: (section: ScheduledSection) => void;
 }
 
+type DragSession = {
+  pointerId: number;
+  startX: number;
+  width: number;
+  originalStart: number;
+  duration: number;
+  section: ScheduledSection;
+  moved: boolean;
+};
+
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+const quantize = (value: number) => Math.round(value / STEP) * STEP;
+
+type StatusState = { type: 'success' | 'warning' | 'error'; text: string } | null;
+
 export const ScheduleGrid = ({ onSelect }: Props) => {
-  const { sections, filters, view } = useScheduleStore();
+  const { sections, filters, view, moveSection } = useScheduleStore();
+  const [status, setStatus] = useState<StatusState>(null);
+  const [dragPreview, setDragPreview] = useState<{ id: string; startMinutes: number } | null>(null);
+  const dragSessionRef = useRef<DragSession | null>(null);
 
   const filtered = useMemo(() => {
     return sections.filter((s) => {
@@ -65,10 +94,16 @@ export const ScheduleGrid = ({ onSelect }: Props) => {
   const grouped = useMemo(() => {
     const rows = mapSectionsToRows(filtered, view) as Record<string, ScheduledSection[]>;
     const entries = Object.entries(rows).map(
-      ([key, value]) => [key, value.map(positionSection)] as [string, PositionedSection[]],
+      ([key, value]) =>
+        [
+          key,
+          value.map((section) =>
+            positionSection(section, dragPreview?.id === section.id ? dragPreview.startMinutes : undefined),
+          ),
+        ] as [string, PositionedSection[]],
     );
     return Object.fromEntries(entries) as Record<string, PositionedSection[]>;
-  }, [filtered, view]);
+  }, [filtered, view, dragPreview]);
 
   const timeMarkers = useMemo(() => {
     const markers: string[] = [];
@@ -77,6 +112,92 @@ export const ScheduleGrid = ({ onSelect }: Props) => {
     }
     return markers;
   }, []);
+
+  useEffect(() => {
+    if (!status) return undefined;
+    const timeout = window.setTimeout(() => setStatus(null), 4000);
+    return () => window.clearTimeout(timeout);
+  }, [status]);
+
+  const handlePointerMove = useCallback((event: PointerEvent) => {
+    const session = dragSessionRef.current;
+    if (!session || event.pointerId !== session.pointerId || session.width === 0) return;
+    const deltaPx = event.clientX - session.startX;
+    const deltaMinutes = quantize((deltaPx / session.width) * TOTAL);
+    const nextStart = clamp(session.originalStart + deltaMinutes, START_MIN, END_MIN - session.duration);
+    if (Math.abs(deltaPx) > 2) session.moved = true;
+    setDragPreview({ id: session.section.id, startMinutes: nextStart });
+  }, []);
+
+const handlePointerUp = useCallback(
+  (event: PointerEvent) => {
+      const session = dragSessionRef.current;
+      if (!session || event.pointerId !== session.pointerId || session.width === 0) return;
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      dragSessionRef.current = null;
+      const deltaPx = event.clientX - session.startX;
+      const deltaMinutes = quantize((deltaPx / session.width) * TOTAL);
+      const nextStart = clamp(session.originalStart + deltaMinutes, START_MIN, END_MIN - session.duration);
+      const moved = session.moved || Math.abs(deltaMinutes) > 0;
+      setDragPreview(null);
+      if (!moved) {
+        onSelect?.(session.section);
+        return;
+      }
+      const startTime = minutesToTime(nextStart);
+      const endTime = minutesToTime(nextStart + session.duration);
+      const result = moveSection(session.section.id, { startTime, endTime });
+      if (!result.success) {
+        setStatus({
+          type: 'error',
+          text: result.conflicts[0] || 'Unable to place section in that slot.',
+        });
+        return;
+      }
+      if (result.warnings.length) {
+        setStatus({ type: 'warning', text: result.warnings[0] });
+      } else {
+        setStatus({
+          type: 'success',
+          text: `${session.section.courseId} moved to ${formatMeetingLabel(startTime, endTime, session.section.dayPattern)}`,
+        });
+      }
+    },
+    [handlePointerMove, moveSection, onSelect],
+  );
+
+  const startDrag = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>, section: PositionedSection) => {
+      event.preventDefault();
+      const track = event.currentTarget.parentElement;
+      if (!track) return;
+      const bounds = track.getBoundingClientRect();
+      const startMinutes = timeToMinutes(section.startTime);
+      const endMinutes = timeToMinutes(section.endTime);
+      dragSessionRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        width: bounds.width,
+        originalStart: startMinutes,
+        duration: endMinutes - startMinutes,
+        section,
+        moved: false,
+      };
+      setDragPreview({ id: section.id, startMinutes });
+      window.addEventListener('pointermove', handlePointerMove);
+      window.addEventListener('pointerup', handlePointerUp);
+    },
+    [handlePointerMove, handlePointerUp],
+  );
+
+  useEffect(
+    () => () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    },
+    [handlePointerMove, handlePointerUp],
+  );
 
   return (
     <Card className="mt-4">
@@ -98,6 +219,20 @@ export const ScheduleGrid = ({ onSelect }: Props) => {
         </div>
       </CardHeader>
       <CardContent>
+        {status && (
+          <div
+            className={cn(
+              'mb-3 rounded-lg border px-3 py-2 text-sm',
+              status.type === 'error'
+                ? 'border-red-200 bg-red-50 text-red-800'
+                : status.type === 'warning'
+                  ? 'border-amber-200 bg-amber-50 text-amber-800'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-800',
+            )}
+          >
+            {status.text}
+          </div>
+        )}
         <div className="mb-2 flex items-center justify-between px-16 text-[11px] text-slate-500">
           {timeMarkers.map((label) => (
             <span key={label} className="w-[6.25%] text-center">
@@ -128,7 +263,23 @@ export const ScheduleGrid = ({ onSelect }: Props) => {
                 </div>
                 <div className="relative h-full">
                   {items.map((section) => (
-                    <ScheduleBlock key={section.id} section={section} onSelect={onSelect} />
+                    <ScheduleBlock
+                      key={section.id}
+                      section={section}
+                      role="button"
+                      tabIndex={0}
+                      onPointerDown={(event) => startDrag(event, section)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onSelect?.(section);
+                        }
+                      }}
+                      onDoubleClick={() => onSelect?.(section)}
+                      className={cn('cursor-grab transition-opacity', {
+                        'cursor-grabbing opacity-90': dragPreview?.id === section.id,
+                      })}
+                    />
                   ))}
                 </div>
               </div>

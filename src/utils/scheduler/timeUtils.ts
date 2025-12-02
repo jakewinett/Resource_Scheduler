@@ -1,8 +1,8 @@
-import type { DayOfWeek } from '../../types';
+import type { DayOfWeek, DayPattern } from '../../types';
 
 export const dayOrder: DayOfWeek[] = ['MO', 'TU', 'WE', 'TH', 'FR'];
 
-export const dayPatternMap = {
+const baseDayPatternMap = {
   'MO-WE': ['MO', 'WE'],
   'TU-TH': ['TU', 'TH'],
   'WE-FR': ['WE', 'FR'],
@@ -11,7 +11,9 @@ export const dayPatternMap = {
   WE: ['WE'],
   TH: ['TH'],
   FR: ['FR'],
-} as const;
+} as const satisfies Record<DayPattern, DayOfWeek[]>;
+
+export const dayPatternMap = baseDayPatternMap;
 
 export type DayPatternKey = keyof typeof dayPatternMap;
 

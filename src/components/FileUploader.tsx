@@ -4,6 +4,7 @@ import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { useExcelParser } from '../hooks/useExcelParser';
 import { useScheduleStore } from '../stores/scheduleStore';
+import { TemplateDownloadButton } from './TemplateDownloadButton';
 
 export const FileUploader = () => {
   const { parse, error, isParsing } = useExcelParser();
@@ -34,11 +35,12 @@ export const FileUploader = () => {
 
   return (
     <Card className="h-full">
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="flex items-center gap-2 text-base">
           <Upload className="h-4 w-4 text-slate-500" />
           Import Excel
         </CardTitle>
+        <TemplateDownloadButton />
       </CardHeader>
       <CardContent>
         <div
